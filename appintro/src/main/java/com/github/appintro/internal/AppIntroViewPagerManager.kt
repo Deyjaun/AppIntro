@@ -2,10 +2,10 @@ package com.github.appintro.internal
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.animation.Interpolator
-import androidx.viewpager.widget.ViewPager
+import androidx.viewpager2.adapter.FragmentStateAdapter
+import androidx.viewpager2.widget.ViewPager2
 import com.github.appintro.AppIntroBase
 import com.github.appintro.AppIntroPageTransformerType
 import com.github.appintro.AppIntroViewPagerListener
@@ -20,7 +20,7 @@ import kotlin.math.max
  * @property isPermissionSlide If the current slide has permissions.
  * @property onNextPageRequestedListener Listener for Next Page events.
  */
-internal class AppIntroViewPager(context: Context, attrs: AttributeSet) : ViewPager(context, attrs) {
+internal class AppIntroViewPagerManager(val viewPager: ViewPager2, private val context: Context) {
 
     var isFullPagingEnabled = true
     var isPermissionSlide = false
@@ -30,7 +30,7 @@ internal class AppIntroViewPager(context: Context, attrs: AttributeSet) : ViewPa
     private var currentTouchDownY: Float = 0.toFloat()
     private var illegallyRequestedNextPageLastCalled: Long = 0
     private var customScroller: ScrollerCustomDuration? = null
-    private var pageChangeListener: OnPageChangeListener? = null
+    private var pageChangeCallback: ViewPager2.OnPageChangeCallback? = null
 
     init {
         // Override the Scroller instance with our own class so we can change the duration
@@ -49,16 +49,30 @@ internal class AppIntroViewPager(context: Context, attrs: AttributeSet) : ViewPa
     }
 
     internal fun addOnPageChangeListener(listener: AppIntroBase.OnPageChangeListener) {
-        super.addOnPageChangeListener(listener)
-        this.pageChangeListener = listener
+        viewPager.registerOnPageChangeCallback(listener)
+        this.pageChangeCallback = listener
+    }
+
+    fun getCurrentItem() = this.viewPager.currentItem
+
+    fun setAdapter(adapter: FragmentStateAdapter) {
+        this.viewPager.adapter = adapter
+    }
+
+    fun setOffscreenPageLimit(value: Int) {
+        this.viewPager.offscreenPageLimit = value
+    }
+
+    fun setPageTransformer(transformer: ViewPager2.PageTransformer?) {
+        this.viewPager.setPageTransformer(transformer)
     }
 
     fun goToNextSlide() {
-        currentItem += if (!LayoutUtil.isRtl(context)) 1 else -1
+        this.viewPager.currentItem += if (!LayoutUtil.isRtl(context)) 1 else -1
     }
 
     fun goToPreviousSlide() {
-        currentItem += if (!LayoutUtil.isRtl(context)) -1 else 1
+        this.viewPager.currentItem += if (!LayoutUtil.isRtl(context)) -1 else 1
     }
 
     internal fun reCenterCurrentSlide() {
@@ -66,21 +80,24 @@ internal class AppIntroViewPager(context: Context, attrs: AttributeSet) : ViewPa
         // We perform a page back and forward to recenter the ViewPager at the current position.
         // This is needed as we're interrupting the user Swipe due to Permissions.
         // If the user denies a permission, we want to recenter the slide.
-        val item = currentItem
+        val item = this.viewPager.currentItem
         setCurrentItem(max(item - 1, 0), false)
         setCurrentItem(item, false)
     }
 
     fun isFirstSlide(size: Int): Boolean {
-        return if (LayoutUtil.isRtl(context)) (currentItem - size + 1 == 0) else (currentItem == 0)
+        return if (LayoutUtil.isRtl(context))
+                (this.viewPager.currentItem - size + 1 == 0) else (this.viewPager.currentItem == 0)
     }
 
     fun isLastSlide(size: Int): Boolean {
-        return if (LayoutUtil.isRtl(context)) (currentItem == 0) else (currentItem - size + 1 == 0)
+        return if (LayoutUtil.isRtl(context))
+                (this.viewPager.currentItem == 0) else (this.viewPager.currentItem - size + 1 == 0)
     }
 
     fun getCurrentSlideNumber(size: Int): Int {
-        return if (LayoutUtil.isRtl(context)) (size - currentItem) else (currentItem + 1)
+        return if (LayoutUtil.isRtl(context))
+                (size - this.viewPager.currentItem) else (this.viewPager.currentItem + 1)
     }
 
     /**
@@ -94,7 +111,7 @@ internal class AppIntroViewPager(context: Context, attrs: AttributeSet) : ViewPa
         // When you pass set current item to 0,
         // The pageChangeListener won't be called so we call it on our own
         if (oldItem == 0 && currentItem == 0) {
-            pageChangeListener?.onPageSelected(0)
+            pageChangeCallback?.onPageSelected(0)
         }
     }
 
@@ -194,11 +211,11 @@ internal class AppIntroViewPager(context: Context, attrs: AttributeSet) : ViewPa
     }
 
     fun setAppIntroPageTransformer(appIntroTransformer: AppIntroPageTransformerType) {
-        setPageTransformer(true, ViewPagerTransformer(appIntroTransformer))
+        setPageTransformer(ViewPagerTransformer(appIntroTransformer))
     }
 
     private companion object {
         private const val ON_ILLEGALLY_REQUESTED_NEXT_PAGE_MAX_INTERVAL = 1000
-        private val TAG = LogHelper.makeLogTag(AppIntroViewPager::class)
+        private val TAG = LogHelper.makeLogTag(AppIntroViewPagerManager::class)
     }
 }

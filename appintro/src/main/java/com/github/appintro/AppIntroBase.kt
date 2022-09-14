@@ -24,11 +24,11 @@ import androidx.appcompat.widget.TooltipCompat.setTooltipText
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
-import androidx.viewpager.widget.ViewPager
+import androidx.viewpager2.widget.ViewPager2
 import com.github.appintro.indicator.DotIndicatorController
 import com.github.appintro.indicator.IndicatorController
 import com.github.appintro.indicator.ProgressIndicatorController
-import com.github.appintro.internal.AppIntroViewPager
+import com.github.appintro.internal.AppIntroViewPagerManager
 import com.github.appintro.internal.LayoutUtil
 import com.github.appintro.internal.LogHelper
 import com.github.appintro.internal.PermissionWrapper
@@ -107,7 +107,7 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
     // Private Fields
 
     private lateinit var pagerAdapter: PagerAdapter
-    private lateinit var pager: AppIntroViewPager
+    private lateinit var pagerManager: AppIntroViewPagerManager
     private var slidesNumber: Int = 0
     private var savedCurrentItem: Int = 0
     private var currentlySelectedItem = -1
@@ -121,7 +121,7 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
 
     // Asks the ViewPager for the current slide number. Useful to query the [permissionsMap]
     private val currentSlideNumber: Int
-        get() = pager.getCurrentSlideNumber(fragments.size)
+        get() = pagerManager.getCurrentSlideNumber(fragments.size)
 
     /** HashMap that contains the [PermissionWrapper] objects */
     private var permissionsMap = HashMap<Int, PermissionWrapper>()
@@ -146,13 +146,15 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
     protected fun addSlide(fragment: Fragment) {
         if (isRtl) {
             fragments.add(0, fragment)
+            pagerAdapter.notifyItemInserted(0)
         } else {
             fragments.add(fragment)
+            pagerAdapter.notifyItemInserted(pagerAdapter.itemCount-1)
         }
+
         if (isWizardMode) {
-            pager.offscreenPageLimit = fragments.size
+            pagerManager.setOffscreenPageLimit(fragments.size)
         }
-        pagerAdapter.notifyDataSetChanged()
     }
 
     /**
@@ -175,16 +177,16 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
 
     /** Moves the AppIntro to the previous slide */
     protected fun goToPreviousSlide() {
-        pager.goToPreviousSlide()
+        pagerManager.goToPreviousSlide()
     }
 
     /** Moves the AppIntro to the next slide */
     @JvmOverloads
-    protected fun goToNextSlide(isLastSlide: Boolean = pager.isLastSlide(fragments.size)) {
+    protected fun goToNextSlide(isLastSlide: Boolean = pagerManager.isLastSlide(fragments.size)) {
         if (isLastSlide) {
             onIntroFinished()
         } else {
-            pager.goToNextSlide()
+            pagerManager.goToNextSlide()
             onNextSlide()
         }
     }
@@ -275,7 +277,7 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
         } else {
             this.isButtonsEnabled = retainIsButtonsEnabled
         }
-        pager.isFullPagingEnabled = !lock
+        pagerManager.isFullPagingEnabled = !lock
     }
 
     /**
@@ -310,17 +312,17 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
      * @param factor the new factor that will be applied to the scroll - default: 1
      */
     protected fun setScrollDurationFactor(factor: Int) {
-        pager.setScrollDurationFactor(factor.toDouble())
+        pagerManager.setScrollDurationFactor(factor.toDouble())
     }
 
     /** Allows to specify one of the [AppIntroPageTransformerType] for the ViewPager */
     protected fun setTransformer(appIntroTransformer: AppIntroPageTransformerType) {
-        pager.setAppIntroPageTransformer(appIntroTransformer)
+        pagerManager.setAppIntroPageTransformer(appIntroTransformer)
     }
 
     /** Overrides viewpager transformer with you custom [ViewPagerTransformer] */
-    protected fun setCustomTransformer(transformer: ViewPager.PageTransformer?) {
-        pager.setPageTransformer(true, transformer)
+    protected fun setCustomTransformer(transformer: ViewPager2.PageTransformer?) {
+        pagerManager.setPageTransformer(transformer)
     }
 
     /*
@@ -328,7 +330,7 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
      =================================== */
 
     /**
-     * Called by [AppIntroViewPager] when the user swipes forward on a slide which contains permissions.
+     * Called by [AppIntroViewPagerManager] when the user swipes forward on a slide which contains permissions.
      * [.setSwipeLock] is called to prevent user from swiping while permission is requested.
      * [.checkAndRequestPermissions] is called to request permissions from the user.
      */
@@ -427,20 +429,20 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
 
         vibrator = this.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
 
-        pagerAdapter = PagerAdapter(supportFragmentManager, fragments)
-        pager = findViewById(R.id.view_pager)
+        pagerAdapter = PagerAdapter(supportFragmentManager, lifecycle, fragments)
+        pagerManager = AppIntroViewPagerManager(findViewById(R.id.view_pager), this)
 
         doneButton.setOnClickListener(NextSlideOnClickListener(isLastSlide = true))
         nextButton.setOnClickListener(NextSlideOnClickListener(isLastSlide = false))
-        backButton.setOnClickListener { pager.goToPreviousSlide() }
+        backButton.setOnClickListener { pagerManager.goToPreviousSlide() }
         skipButton.setOnClickListener {
             dispatchVibration()
-            onSkipPressed(pagerAdapter.getItem(pager.currentItem))
+            onSkipPressed(pagerAdapter.getItem(pagerManager.getCurrentItem()))
         }
 
-        pager.adapter = this.pagerAdapter
-        pager.addOnPageChangeListener(OnPageChangeListener())
-        pager.onNextPageRequestedListener = this
+        pagerManager.setAdapter(this.pagerAdapter)
+        pagerManager.addOnPageChangeListener(OnPageChangeListener())
+        pagerManager.onNextPageRequestedListener = this
 
         setScrollDurationFactor(DEFAULT_SCROLL_DURATION_FACTOR)
     }
@@ -456,19 +458,18 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
 
         // Required for triggering onPageSelected and onSlideChanged for the first page.
         if (isRtl) {
-            pager.currentItem = fragments.size - savedCurrentItem
+            pagerManager.setCurrentItem(fragments.size - savedCurrentItem)
         } else {
-            pager.currentItem = savedCurrentItem
+            pagerManager.setCurrentItem(savedCurrentItem)
         }
 
-        pager.post {
-            val fragment = pagerAdapter.getItem(pager.currentItem)
+        pagerManager.viewPager.post {
+            val fragment = pagerAdapter.getItem(pagerManager.getCurrentItem())
             // Fragment is null when no slides are passed to AppIntro
             if (fragment != null) {
                 dispatchSlideChangedCallbacks(
                     null,
-                    pagerAdapter
-                        .getItem(pager.currentItem)
+                    pagerAdapter.getItem(pagerManager.getCurrentItem())
                 )
             } else {
                 // Close the intro if there are no slides to show
@@ -488,12 +489,12 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
 
             // We can't use pager.currentItem as we need the current item that is RTL-invariant.
             val currentItem = if (isRtl) {
-                fragments.size - pager.currentItem
+                fragments.size - pagerManager.getCurrentItem()
             } else {
-                pager.currentItem
+                pagerManager.getCurrentItem()
             }
             putInt(ARG_BUNDLE_CURRENT_ITEM, currentItem)
-            putBoolean(ARG_BUNDLE_IS_FULL_PAGING_ENABLED, pager.isFullPagingEnabled)
+            putBoolean(ARG_BUNDLE_IS_FULL_PAGING_ENABLED, pagerManager.isFullPagingEnabled)
 
             putSerializable(ARG_BUNDLE_PERMISSION_MAP, permissionsMap)
 
@@ -511,7 +512,7 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
             isIndicatorEnabled = getBoolean(ARG_BUNDLE_IS_INDICATOR_ENABLED)
 
             savedCurrentItem = getInt(ARG_BUNDLE_CURRENT_ITEM)
-            pager.isFullPagingEnabled = getBoolean(ARG_BUNDLE_IS_FULL_PAGING_ENABLED)
+            pagerManager.isFullPagingEnabled = getBoolean(ARG_BUNDLE_IS_FULL_PAGING_ENABLED)
 
             permissionsMap = (
                 (getSerializable(ARG_BUNDLE_PERMISSION_MAP) as HashMap<Int, PermissionWrapper>?)
@@ -533,13 +534,13 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
             code == KeyEvent.KEYCODE_BUTTON_A ||
             code == KeyEvent.KEYCODE_DPAD_CENTER
         ) {
-            val isLastSlide = pager.isLastSlide(fragments.size)
+            val isLastSlide = pagerManager.isLastSlide(fragments.size)
             goToNextSlide(isLastSlide)
             if (isLastSlide) {
                 // We emulate the onDonePressed here to keep backward compatibility
                 // with the previous API (users expect an onDonePressed to kill the Activity).
                 // Ideally we should get rid of this extra callback in one of the future release.
-                onDonePressed(pagerAdapter.getItem(pager.currentItem))
+                onDonePressed(pagerAdapter.getItem(pagerManager.getCurrentItem()))
             }
             return false
         }
@@ -551,10 +552,10 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
         if (isSystemBackButtonLocked) {
             return
         }
-        if (pager.isFirstSlide(fragments.size)) {
+        if (pagerManager.isFirstSlide(fragments.size)) {
             super.onBackPressed()
         } else {
-            pager.goToPreviousSlide()
+            pagerManager.goToPreviousSlide()
         }
     }
 
@@ -564,8 +565,8 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
 
     private fun updateButtonsVisibility() {
         if (isButtonsEnabled) {
-            val isLastSlide = pager.isLastSlide(fragments.size)
-            val isFirstSlide = pager.isFirstSlide(fragments.size)
+            val isLastSlide = pagerManager.isLastSlide(fragments.size)
+            val isFirstSlide = pagerManager.isFirstSlide(fragments.size)
             nextButton.isVisible = !isLastSlide
             doneButton.isVisible = isLastSlide
             skipButton.isVisible = isSkipButtonEnabled && !isLastSlide
@@ -589,7 +590,7 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
      * @return true, if the slide change should be allowed, else false
      */
     override fun onCanRequestNextPage(): Boolean {
-        val currentFragment = pagerAdapter.getItem(pager.currentItem)
+        val currentFragment = pagerAdapter.getItem(pagerManager.getCurrentItem())
 
         // Check if the current fragment implements SlidePolicy, else a change is always allowed.
         return if (currentFragment is SlidePolicy && !currentFragment.isPolicyRespected) {
@@ -602,7 +603,7 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
     }
 
     override fun onIllegallyRequestedNextPage() {
-        val currentFragment = pagerAdapter.getItem(pager.currentItem)
+        val currentFragment = pagerAdapter.getItem(pagerManager.getCurrentItem())
         if (currentFragment is SlidePolicy) {
             if (!currentFragment.isPolicyRespected) {
                 currentFragment.onUserIllegallyRequestedNextPage()
@@ -659,7 +660,7 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
             // At least one or all of the permissions have been denied.
             deniedPermissions.forEach(::handleDeniedPermission)
             // Let's force a recenter of the current slide.
-            pager.reCenterCurrentSlide()
+            pagerManager.reCenterCurrentSlide()
         }
     }
 
@@ -696,11 +697,11 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
     }
 
     /**
-     * Getter used to notify [AppIntroViewPager] if the currently selected slide
+     * Getter used to notify [AppIntroViewPagerManager] if the currently selected slide
      * has permissions attached to it.
      */
     private val isPermissionSlide: Boolean
-        get() = pager.getCurrentSlideNumber(fragments.size) in permissionsMap
+        get() = pagerManager.getCurrentSlideNumber(fragments.size) in permissionsMap
 
     /** Takes care of calling all the necessary callbacks on Slide Changing. */
     private fun dispatchSlideChangedCallbacks(oldFragment: Fragment?, newFragment: Fragment?) {
@@ -762,7 +763,7 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
             }
 
             // We can successfully change slide, let's do it.
-            val currentFragment = pagerAdapter.getItem(pager.currentItem)
+            val currentFragment = pagerAdapter.getItem(pagerManager.getCurrentItem())
             if (isLastSlide) {
                 onDonePressed(currentFragment)
             } else {
@@ -776,10 +777,10 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
      * [OnPageChangeListener] used to handle all the callbacks coming from the ViewPager.
      * Moreover, if [isColorTransitionsEnabled] a color interpolation will happen in the [onPageScrolled]
      */
-    internal inner class OnPageChangeListener : ViewPager.OnPageChangeListener {
+    internal inner class OnPageChangeListener : ViewPager2.OnPageChangeCallback() {
 
         override fun onPageScrolled(position: Int, positionOffset: Float, positionOffsetPixels: Int) {
-            if (isColorTransitionsEnabled && position < pagerAdapter.count - 1) {
+            if (isColorTransitionsEnabled && position < pagerAdapter.itemCount - 1) {
                 val currentSlide = pagerAdapter.getItem(position)
                 val nextSlide = pagerAdapter.getItem(position + 1)
                 performColorTransition(currentSlide, nextSlide, positionOffset)
@@ -792,7 +793,7 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
             }
             updateButtonsVisibility()
 
-            pager.isPermissionSlide = this@AppIntroBase.isPermissionSlide
+            pagerManager.isPermissionSlide = this@AppIntroBase.isPermissionSlide
 
             // Firing all the necessary Callbacks
             this@AppIntroBase.onPageSelected(position)
@@ -802,7 +803,7 @@ abstract class AppIntroBase : AppCompatActivity(), AppIntroViewPagerListener {
                 } else {
                     dispatchSlideChangedCallbacks(
                         pagerAdapter.getItem(currentlySelectedItem),
-                        pagerAdapter.getItem(pager.currentItem)
+                        pagerAdapter.getItem(pagerManager.getCurrentItem())
                     )
                 }
             }

@@ -3,7 +3,7 @@ package com.github.appintro.internal.viewpager
 import android.view.View
 import android.widget.ImageView
 import android.widget.TextView
-import androidx.viewpager.widget.ViewPager
+import androidx.viewpager2.widget.ViewPager2
 import com.github.appintro.AppIntroPageTransformerType
 import com.github.appintro.R
 import com.github.appintro.internal.LogHelper
@@ -18,7 +18,7 @@ private const val FLOW_ROTATION_ANGLE = -30f
 
 internal class ViewPagerTransformer(
     private val transformType: AppIntroPageTransformerType
-) : ViewPager.PageTransformer {
+) : ViewPager2.PageTransformer {
 
     private var titlePF: Double = 0.0
     private var imagePF: Double = 0.0
